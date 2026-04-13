@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 카메라 아이콘 (교통위반 감지 앱) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,36 C44.06,36 36,44.06 36,54 C36,63.94 44.06,72 54,72 C63.94,72 72,63.94 72,54 C72,44.06 63.94,36 54,36Z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M78,42 L72,42 L69,36 L39,36 L36,42 L30,42 C27.8,42 26,43.8 26,46 L26,70 C26,72.2 27.8,74 30,74 L78,74 C80.2,74 82,72.2 82,70 L82,46 C82,43.8 80.2,42 78,42ZM54,68 C46.28,68 40,61.72 40,54 C40,46.28 46.28,40 54,40 C61.72,40 68,46.28 68,54 C68,61.72 61.72,68 54,68Z"/>
+</vector>

@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 메인 화면 레이아웃
+     - 카메라 프리뷰 (전체 화면)
+     - 상태 텍스트 (위반 유형 표시)
+     - 감지 시작/중지 버튼 -->
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <!-- 카메라 프리뷰 -->
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- 위반 상태 표시 (화면 상단) -->
+    <TextView
+        android:id="@+id/tvStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#AA000000"
+        android:padding="12dp"
+        android:text="감지 대기 중..."
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:gravity="center"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <!-- 버퍼 상태 표시 (프레임 누적 현황) -->
+    <TextView
+        android:id="@+id/tvBuffer"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="#AA000000"
+        android:padding="8dp"
+        android:text="버퍼: 0/25"
+        android:textColor="#AAFFFFFF"
+        android:textSize="12sp"
+        app:layout_constraintTop_toBottomOf="@id/tvStatus"
+        app:layout_constraintStart_toStartOf="parent"
+        android:layout_margin="8dp" />
+
+    <!-- 녹화 중 표시 -->
+    <TextView
+        android:id="@+id/tvRecording"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:background="#AAFF0000"
+        android:padding="8dp"
+        android:text="● 저장 중"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/tvStatus"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_margin="8dp" />
+
+    <!-- 일시정지/재개 버튼 (앱 실행 시 자동 감지 시작됨) -->
+    <Button
+        android:id="@+id/btnToggle"
+        android:layout_width="160dp"
+        android:layout_height="56dp"
+        android:text="모델 로드 중..."
+        android:enabled="false"
+
+        android:textSize="16sp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="32dp" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
