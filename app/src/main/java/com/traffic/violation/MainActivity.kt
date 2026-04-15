@@ -54,6 +54,13 @@ class MainActivity : AppCompatActivity() {
         // 백그라운드 스레드 (카메라 이미지 분석용)
         cameraExecutor = Executors.newSingleThreadExecutor()
 
+        // 추론 디버그 상태 → OverlayView 실시간 업데이트
+        detector.onDebugUpdate = { debugState ->
+            runOnUiThread {
+                binding.overlayView.updateState(debugState)
+            }
+        }
+
         // 저장 완료 시 토스트 표시
         recorder.onSaveComplete = { filePath, violationType ->
             runOnUiThread {

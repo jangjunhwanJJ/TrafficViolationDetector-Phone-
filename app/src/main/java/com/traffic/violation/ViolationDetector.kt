@@ -76,6 +76,9 @@ class ViolationDetector(private val context: Context) {
     // 정지선 감지용 — 이전 프레임에 정지선이 있었는지
     private var stopLineWasVisible = false
 
+    // 매 추론마다 호출 — OverlayView 업데이트용
+    var onDebugUpdate: ((DetectionDebugState) -> Unit)? = null
+
     private var lrcnInterpreter: Interpreter? = null
     private var ortEnvironment: OrtEnvironment? = null
     private val yoloSessions = mutableMapOf<String, OrtSession>()
@@ -121,8 +124,45 @@ class ViolationDetector(private val context: Context) {
         isMoving: Boolean,
         crossedStopLine: Boolean
     ): DetectionResult? {
-        val frames = frameBuffer.toList()
 
+        // ── [1단계] YOLO 먼저 실행 ────────────────────────
+        // 3개 모델 모두 실행 → 탐지된 위반 유형 후보 수집
+        val yoloResults = LABELS.associateWith { label -> runYolo(originalFrame, label) }
+        val yoloDetected = yoloResults.filter { it.value.isNotEmpty() }
+
+        // YOLO가 아무것도 감지 못하면 → 정상 주행으로 판단, LRCN 건너뜀
+        if (yoloDetected.isEmpty()) {
+            consecutiveCount = 0
+            lastDetectedType = ""
+            Log.d("ViolationDetector", "YOLO 감지 없음 → 정상 주행")
+            onDebugUpdate?.invoke(DetectionDebugState(
+                isMoving = isMoving, yoloBoxes = emptyMap(), yoloDetected = false,
+                frameW = originalFrame.width, frameH = originalFrame.height
+            ))
+            return null
+        }
+
+        // 가장 높은 confidence를 가진 YOLO 결과를 1차 후보로
+        val yoloPrimaryLabel = yoloDetected
+            .maxByOrNull { entry -> entry.value.maxOf { it[4] } }!!.key
+        Log.d("ViolationDetector", "YOLO 1차 감지: $yoloPrimaryLabel (${yoloDetected.keys})")
+
+        // ── [2단계] 모션 게이트 ───────────────────────────
+        if (!isMoving && yoloPrimaryLabel != "신호위반") {
+            Log.d("ViolationDetector", "정지 상태 → ${yoloPrimaryLabel} 스킵")
+            consecutiveCount = 0
+            lastDetectedType = ""
+            onDebugUpdate?.invoke(DetectionDebugState(
+                isMoving = false,
+                yoloBoxes = yoloDetected.mapValues { it.value.map { d -> d } },
+                yoloDetected = true,
+                frameW = originalFrame.width, frameH = originalFrame.height
+            ))
+            return null
+        }
+
+        // ── [3단계] LRCN으로 유형 확인 ───────────────────
+        val frames = frameBuffer.toList()
         val inputBuffer = ByteBuffer.allocateDirect(
             1 * SEQUENCE_LENGTH * IMAGE_SIZE * IMAGE_SIZE * 3 * 4
         ).apply { order(ByteOrder.nativeOrder()) }
@@ -141,52 +181,32 @@ class ViolationDetector(private val context: Context) {
         val output = Array(1) { FloatArray(3) }
         lrcnInterpreter?.run(inputBuffer, output)
 
-        val probs   = output[0]
-        val maxIdx  = probs.indices.maxByOrNull { probs[it] } ?: return null
+        val probs      = output[0]
+        val maxIdx     = probs.indices.maxByOrNull { probs[it] } ?: return null
         val confidence = probs[maxIdx]
+        val lrcnLabel  = LABELS[maxIdx]
 
-        if (confidence < CONFIDENCE_THRESHOLD) {
-            consecutiveCount = 0
-            lastDetectedType = ""
-            return null
-        }
+        // LRCN confidence가 낮으면 YOLO 1차 후보를 사용, 높으면 LRCN 우선
+        val finalLabel = if (confidence >= CONFIDENCE_THRESHOLD) lrcnLabel else yoloPrimaryLabel
+        Log.d("ViolationDetector", "LRCN: $lrcnLabel (${"%.0f".format(confidence * 100)}%), 최종: $finalLabel")
 
-        val rawLabel = LABELS[maxIdx]
-
-        // ── 정상 주행 게이트 적용 ─────────────────────────
-        // 차량이 정지 중이면 중앙선침범 / 진로변경위반은 스킵
-        if (!isMoving && rawLabel != "신호위반") {
-            Log.d("ViolationDetector", "정지 상태 → ${rawLabel} 스킵")
-            consecutiveCount = 0
-            lastDetectedType = ""
-            return null
-        }
-
-        // ── 신호위반: 브레이크등 필터 ─────────────────────
-        // 상단에 실제 신호등 빨간불이 없으면 제외
-        var correctedLabel = rawLabel
-        if (rawLabel == "신호위반" && !hasTrafficLightRed(originalFrame)) {
+        // ── [4단계] 보정 필터 ─────────────────────────────
+        // 신호위반: 실제 빨간 신호등 확인
+        if (finalLabel == "신호위반" && !hasTrafficLightRed(originalFrame)) {
             Log.d("ViolationDetector", "신호등 미감지 → 신호위반 스킵")
             consecutiveCount = 0
             lastDetectedType = ""
             return null
         }
 
-        // ── HSV 보정 고도화: 중앙선 방향 확인 ────────────
-        correctedLabel = hsvCorrect(correctedLabel, originalFrame)
+        // HSV 보정 (진로변경 → 중앙선침범 교정)
+        val correctedLabel = hsvCorrect(finalLabel, originalFrame)
 
-        // ── 정지선 통과 보정 ──────────────────────────────
         if (crossedStopLine && correctedLabel == "신호위반") {
             Log.d("ViolationDetector", "정지선 통과 + 신호위반 일치 → 확정")
         }
 
-        // ── YOLO 검증 ─────────────────────────────────────
-        // LRCN이 감지한 위반 유형에 해당하는 YOLO 모델로 객체 탐지
-        val yoloBoxes = runYolo(originalFrame, correctedLabel)
-        val yoloConfirmed = yoloBoxes.isNotEmpty()
-        Log.d("ViolationDetector", "YOLO [$correctedLabel]: ${yoloBoxes.size}개 탐지, 확인=$yoloConfirmed")
-
-        // ── 연속 감지 카운트 ──────────────────────────────
+        // ── [5단계] 연속 감지 카운트 ─────────────────────
         if (correctedLabel == lastDetectedType) {
             consecutiveCount++
         } else {
@@ -194,19 +214,35 @@ class ViolationDetector(private val context: Context) {
             lastDetectedType = correctedLabel
         }
 
-        // YOLO가 확인하면 연속 기준 1 낮춤 (최소 1회)
+        // YOLO + LRCN 모두 같은 유형이면 연속 기준 1 낮춤
+        val yoloLrcnAgree = yoloDetected.containsKey(correctedLabel) && lrcnLabel == correctedLabel
         val required = (CONFIRM_COUNTS[correctedLabel] ?: 2).let {
-            if (yoloConfirmed) (it - 1).coerceAtLeast(1) else it
+            if (yoloLrcnAgree) (it - 1).coerceAtLeast(1) else it
         }
-        if (consecutiveCount < required) return null
+        val isConfirmed = consecutiveCount >= required
+        onDebugUpdate?.invoke(DetectionDebugState(
+            isMoving = isMoving,
+            yoloBoxes = yoloDetected.mapValues { it.value.map { d -> d } },
+            yoloDetected = true,
+            lrcnLabel = lrcnLabel,
+            lrcnConf = confidence,
+            finalLabel = correctedLabel,
+            consecutive = consecutiveCount,
+            required = required,
+            confirmed = isConfirmed,
+            frameW = originalFrame.width,
+            frameH = originalFrame.height
+        ))
+
+        if (!isConfirmed) return null
 
         consecutiveCount = 0
         lastDetectedType = ""
 
         return DetectionResult(
-            violationType  = correctedLabel,
-            confidence     = confidence,
-            probabilities  = probs
+            violationType = correctedLabel,
+            confidence    = confidence,
+            probabilities = probs
         )
     }
 
@@ -394,7 +430,7 @@ class ViolationDetector(private val context: Context) {
             val det = anchor as? FloatArray ?: continue
             if (det.size < 5) continue
             val objConf = det[4]
-            val maxCls  = if (det.size > 5) det.drop(5).max() ?: 0f else 1f
+            val maxCls  = if (det.size > 5) det.drop(5).maxOrNull() ?: 0f else 1f
             val conf    = objConf * maxCls
             if (conf > 0.4f) boxes.add(det)
         }
